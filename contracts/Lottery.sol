@@ -19,6 +19,7 @@ contract Lottery is
 
     IERC20 public lottoToken;
     mapping(uint256 => mapping(string => uint256)) public ticketCount;
+    mapping(uint256 => mapping(string => address)) public ticketOwners;
     uint256 public ticketPrice = 0.001 ether; // Precio inicial de 0.001 ETH
     uint256 public totalTickets;
     uint256 public prizePool;
@@ -42,6 +43,7 @@ contract Lottery is
     }
 
     PrizeLevel[6] public prizeLevels;
+    bytes32[] public winningNodes;
 
     event TicketPurchased(
         address indexed buyer,
@@ -132,6 +134,9 @@ contract Lottery is
         // Actualizar el contador de boletos
         ticketCount[series][number] += fraction;
 
+        // Registrar el propietario del boleto
+        ticketOwners[series][number] = msg.sender;
+
         // Actualizar totalTickets y prizePool
         totalTickets += fraction;
         prizePool += cost;
@@ -196,17 +201,19 @@ contract Lottery is
                 ) % totalTickets;
                 uint256 cumulativeTickets = 0;
                 bool found = false;
-                for (
-                    uint256 series = 0;
-                    series < seriesCount && !found;
-                    series++
-                ) {
+
+                for (uint256 series = 0; series < seriesCount && !found; series++) {
                     for (uint256 k = 0; k < 100000 && !found; k++) {
                         string memory numStr = uintToStr(k);
                         cumulativeTickets += ticketCount[series][numStr];
                         if (cumulativeTickets > winnerIndex) {
-                            prizeLevels[i].winners.push(msg.sender); // Placeholder: Actual winner selection logic needed
+                            address winner = ticketOwners[series][numStr];
+                            prizeLevels[i].winners.push(winner);
                             found = true;
+
+                            // Registrar el nodo ganador
+                            bytes32 winningNode = keccak256(abi.encodePacked(series, numStr));
+                            winningNodes.push(winningNode);
                         }
                     }
                 }
@@ -239,6 +246,10 @@ contract Lottery is
             delete prizeLevels[i].winners;
             prizeLevels[i].winners = new address[](prizeLevels[i].winnerCount);
         }
+    }
+
+    function getTicketOwner(uint256 series, string memory numStr) internal view returns (address) {
+        return ticketOwners[series][numStr];
     }
 
     function pause(bool _paused) external onlyOwner nonReentrant {
@@ -318,5 +329,14 @@ contract Lottery is
             }
         }
         return string(abi.encodePacked(ret));
+    }
+
+    function isWinningNode(bytes32 node) external view returns (bool) {
+        for (uint256 i = 0; i < winningNodes.length; i++) {
+            if (winningNodes[i] == node) {
+                return true;
+            }
+        }
+        return false;
     }
 }
