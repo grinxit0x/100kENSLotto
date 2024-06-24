@@ -39,11 +39,32 @@ contract NFTVault is ReentrancyGuard, Ownable {
     event DepositMade(address indexed owner, bytes32 indexed node);
     event WithdrawalMade(address indexed owner, bytes32 indexed node);
     event RewardClaimed(address indexed owner, uint256 reward);
+    event ENSAddressUpdated(address indexed oldAddress, address indexed newAddress);
+    event ENSResolverAddressUpdated(address indexed oldAddress, address indexed newAddress);
+    event LotteryAddressUpdated(address indexed oldAddress, address indexed newAddress);
 
     constructor(address _ens, address _resolver, address _lottery) Ownable(msg.sender) {
         ens = IENS(_ens);
         resolver = IENSResolver(_resolver);
         lottery = ILottery(_lottery);
+    }
+
+    function setENSAddress(address _ens) external onlyOwner {
+        address oldAddress = address(ens);
+        ens = IENS(_ens);
+        emit ENSAddressUpdated(oldAddress, _ens);
+    }
+
+    function setENSResolverAddress(address _resolver) external onlyOwner {
+        address oldAddress = address(resolver);
+        resolver = IENSResolver(_resolver);
+        emit ENSResolverAddressUpdated(oldAddress, _resolver);
+    }
+
+    function setLotteryAddress(address _lottery) external onlyOwner {
+        address oldAddress = address(lottery);
+        lottery = ILottery(_lottery);
+        emit LotteryAddressUpdated(oldAddress, _lottery);
     }
 
     function isValidENS5DigitDomain(bytes32 node) public view returns (bool) {
