@@ -1,7 +1,7 @@
 # 100k ENS Lotto
 
 ## Overview
-100k ENS Lotto is a decentralized lottery system built on Ethereum, utilizing ENS (Ethereum Name Service) domains. The lottery allows users to buy tickets for a chance to win prizes, with a portion of the prize pool distributed to stakers of 5-digit ENS domains.
+100k ENS Lotto is a decentralized lottery system built on Ethereum, utilizing ENS (Ethereum Name Service) domains. The lottery allows users to buy tickets for a chance to win prizes, with a portion of the prize pool distributed to stakers of 5-digit ENS domains. The lottery is unique and exclusive to ENS domains ranging from `00000.eth` to `99999.eth`.
 
 ## Contracts
 
