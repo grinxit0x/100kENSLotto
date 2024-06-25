@@ -28,6 +28,7 @@ contract Lottery is
     uint256 public organizerFeeRate;
     uint256 public lastDrawTime;
     uint256 public nftRewardRate = 1000; // 10% para los stakers
+    uint256 public organizerFeeBalance;
     bool public paused = true; // Inicialmente pausado
     bool public prizeLevelsSet = false; // Controla si los niveles de premios están configurados
 
@@ -38,6 +39,8 @@ contract Lottery is
     uint64 s_subscriptionId;
     bytes32 keyHash;
     uint256 public s_requestId;
+    uint256 public lastWithdrawalTime;
+    uint256 public withdrawalInterval = 365 days;
 
     struct PrizeLevel {
         uint256 percentage;
@@ -143,6 +146,7 @@ contract Lottery is
         totalTickets += 1;
         prizePool += cost;
 
+        // Emitir el token al comprador
         emit TicketPurchased(msg.sender, series, number, fraction);
     }
 
@@ -199,12 +203,14 @@ contract Lottery is
     function drawWinners(uint256 randomSeed) internal nonReentrant {
         require(totalTickets > 0, "No tickets sold");
 
-        uint256 organizerFee = (prizePool * organizerFeeRate) / 10000;
-        uint256 nftReward = (prizePool * nftRewardRate) / 10000;
-        uint256 totalPrize = prizePool - organizerFee - nftReward;
+        // Cálculo de las comisiones y premios
+        uint256 organizerFee = (prizePool * organizerFeeRate) / 10000; // Comisión del organizador
+        uint256 nftReward = (prizePool * nftRewardRate) / 10000; // Recompensa para el NFTVault
+        uint256 totalPrize = prizePool - organizerFee - nftReward; // Total del premio después de las deducciones
 
         uint256[] memory prizes = new uint256[](prizeLevels.length);
 
+        // Selección de ganadores y distribución de premios
         for (uint256 i = 0; i < prizeLevels.length; i++) {
             prizes[i] = (totalPrize * prizeLevels[i].percentage) / 10000;
             for (uint256 j = 0; j < prizeLevels[i].winnerCount; j++) {
@@ -214,6 +220,7 @@ contract Lottery is
                 uint256 cumulativeTickets = 0;
                 bool found = false;
 
+                // Buscar el ticket ganador
                 for (uint256 series = 0; series < seriesCount && !found; series++) {
                     for (uint256 k = 0; k < 100000 && !found; k++) {
                         string memory numStr = uintToStr(k);
@@ -232,39 +239,45 @@ contract Lottery is
             }
         }
 
+        // Transferencia de premios a los ganadores
         for (uint256 i = 0; i < prizeLevels.length; i++) {
             for (uint256 j = 0; j < prizeLevels[i].winnerCount; j++) {
-                require(
-                    lottoToken.transfer(
-                        prizeLevels[i].winners[j],
-                        prizes[i] / prizeLevels[i].winnerCount
-                    ),
-                    "Prize transfer failed"
-                );
+                (bool success, ) = prizeLevels[i].winners[j].call{value: prizes[i] / prizeLevels[i].winnerCount}("");
+                require(success, "Prize transfer failed");
             }
         }
 
-        // Transfer the NFT reward to the NFTVault contract
-        require(
-            lottoToken.transfer(address(nftVault), nftReward),
-            "NFT reward transfer failed"
-        );
+        // Transferir la recompensa NFT al contrato NFTVault
+        (bool nftRewardSuccess, ) = address(nftVault).call{value: nftReward}("");
+        require(nftRewardSuccess, "NFT reward transfer failed");
         nftVault.addToRewardPool(nftReward);
 
-        require(
-            lottoToken.transfer(owner(), organizerFee),
-            "Fee transfer failed"
-        );
+        // Acumular la comisión del organizador
+        organizerFeeBalance += organizerFee;
 
         emit WinnersSelected(flattenWinners(), prizes);
 
-        // Reset lottery
+        // Reiniciar la lotería
         totalTickets = 0;
         prizePool = 0;
         for (uint256 i = 0; i < prizeLevels.length; i++) {
             delete prizeLevels[i].winners;
             prizeLevels[i].winners = new address[](prizeLevels[i].winnerCount);
         }
+    }
+
+    function withdrawOrganizerFunds() external onlyOwner nonReentrant {
+        require(block.timestamp >= lastWithdrawalTime + withdrawalInterval, "Withdrawal not allowed yet");
+        
+        uint256 amount = organizerFeeBalance;
+        require(amount > 0, "No funds to withdraw");
+
+        // Resetear el balance de comisiones del organizador
+        organizerFeeBalance = 0;
+        lastWithdrawalTime = block.timestamp;
+
+        (bool success, ) = owner().call{value: amount}("");
+        require(success, "Withdrawal failed");
     }
 
     function getTicketOwner(uint256 series, string memory numStr) internal view returns (address) {
