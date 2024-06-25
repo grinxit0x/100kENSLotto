@@ -9,6 +9,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./TimeUtils.sol";
 import "./NFTVault.sol";
+import "./LOTTOERC20.sol";
 
 contract Lottery is
     Ownable,
@@ -18,7 +19,7 @@ contract Lottery is
 {
     using TimeUtils for uint256;
 
-    IERC20 public lottoToken;
+    LOTTOERC20 public lottoToken;
     NFTVault public nftVault;
     mapping(uint256 => mapping(string => uint256)) public ticketCount;
     mapping(uint256 => mapping(string => address)) public ticketOwners;
@@ -72,7 +73,7 @@ contract Lottery is
         uint64 subscriptionId,
         address _nftVault
     ) Ownable(msg.sender) VRFConsumerBaseV2(vrfCoordinator) {
-        lottoToken = IERC20(_lottoToken);
+        lottoToken = LOTTOERC20(_lottoToken);
         organizerFeeRate = _organizerFeeRate;
         lastDrawTime = block.timestamp;
         COORDINATOR = VRFCoordinatorV2Interface(vrfCoordinator);
@@ -123,18 +124,13 @@ contract Lottery is
         emit PrizeLevelsSet();
     }
 
-    function buyTickets(string memory number) external nonReentrant {
+    function buyTickets(string memory number) external payable nonReentrant {
         require(!paused, "Sorteo esta pausado");
         require(bytes(number).length == 5, "Numero no valido");
+        require(msg.value == ticketPrice, "Cantidad incorrecta de ETH");
 
         (uint256 series, uint256 fraction) = getNextAvailableTicket(number);
         require(series < seriesCount, "Todas las series y fracciones vendidas para este numero");
-
-        uint256 cost = ticketPrice;
-        require(
-            lottoToken.transferFrom(msg.sender, address(this), cost),
-            "Pago fallido"
-        );
 
         // Actualizar el contador de boletos
         ticketCount[series][number] += 1;
@@ -144,9 +140,11 @@ contract Lottery is
 
         // Actualizar totalTickets y prizePool
         totalTickets += 1;
-        prizePool += cost;
+        prizePool += msg.value;
 
         // Emitir el token al comprador
+        lottoToken.mint(msg.sender, 1);
+
         emit TicketPurchased(msg.sender, series, number, fraction);
     }
 
