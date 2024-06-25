@@ -23,21 +23,21 @@ contract NFTVault is ReentrancyGuard, Ownable {
     ILottery public lottery;
     uint256 public rewardPool;
 
-    struct Deposit {
+    struct Staker {
         address owner;
         bytes32 node;
-        uint256 depositedAt;
+        uint256 registeredAt;
         uint256 rewardMultiplier;
         uint256 lastClaimed;
     }
 
-    mapping(bytes32 => Deposit) public deposits;
+    mapping(bytes32 => Staker) public stakers;
     mapping(address => bytes32[]) public addressToNodes;
     mapping(address => uint256) public totalRewards;
     address[] public stakerAddresses;
 
-    event DepositMade(address indexed owner, bytes32 indexed node);
-    event WithdrawalMade(address indexed owner, bytes32 indexed node);
+    event Staked(address indexed owner, bytes32 indexed node);
+    event Unstaked(address indexed owner, bytes32 indexed node);
     event RewardClaimed(address indexed owner, uint256 reward);
     event ENSAddressUpdated(address indexed oldAddress, address indexed newAddress);
     event ENSResolverAddressUpdated(address indexed oldAddress, address indexed newAddress);
@@ -84,15 +84,15 @@ contract NFTVault is ReentrancyGuard, Ownable {
         return true;
     }
 
-    function depositENS(bytes32 node) public nonReentrant {
+    function registerENS(bytes32 node) public nonReentrant {
         require(isValidENS5DigitDomain(node), "Invalid ENS 5-digit domain");
         address owner = ens.owner(node);
-        require(owner == msg.sender, "Only the owner can deposit");
+        require(owner == msg.sender, "Only the owner can register");
 
-        deposits[node] = Deposit({
+        stakers[node] = Staker({
             owner: msg.sender,
             node: node,
-            depositedAt: block.timestamp,
+            registeredAt: block.timestamp,
             rewardMultiplier: 1,
             lastClaimed: block.timestamp
         });
@@ -100,12 +100,12 @@ contract NFTVault is ReentrancyGuard, Ownable {
         addressToNodes[msg.sender].push(node);
         stakerAddresses.push(msg.sender);
 
-        emit DepositMade(msg.sender, node);
+        emit Staked(msg.sender, node);
     }
 
-    function withdrawENS(bytes32 node) public nonReentrant {
-        Deposit storage deposit = deposits[node];
-        require(deposit.owner == msg.sender, "Only the owner can withdraw");
+    function unregisterENS(bytes32 node) public nonReentrant {
+        Staker storage staker = stakers[node];
+        require(staker.owner == msg.sender, "Only the owner can unregister");
 
         uint256 reward = calculateReward(node);
         rewardPool -= reward;
@@ -121,14 +121,14 @@ contract NFTVault is ReentrancyGuard, Ownable {
             }
         }
 
-        delete deposits[node];
-        emit WithdrawalMade(msg.sender, node);
+        delete stakers[node];
+        emit Unstaked(msg.sender, node);
     }
 
     function calculateReward(bytes32 node) public view returns (uint256) {
-        Deposit storage deposit = deposits[node];
-        uint256 stakingDuration = block.timestamp - deposit.depositedAt;
-        uint256 reward = (rewardPool * deposit.rewardMultiplier * stakingDuration) / 1e18;
+        Staker storage staker = stakers[node];
+        uint256 stakingDuration = block.timestamp - staker.registeredAt;
+        uint256 reward = (rewardPool * staker.rewardMultiplier * stakingDuration) / 1e18;
 
         // Adding a bonus multiplier if the NFT has been a winning NFT
         uint256 bonusMultiplier = 1;
@@ -145,8 +145,8 @@ contract NFTVault is ReentrancyGuard, Ownable {
             address stakerAddress = stakerAddresses[i];
             bytes32[] storage nodes = addressToNodes[stakerAddress];
             for (uint256 j = 0; j < nodes.length; j++) {
-                Deposit storage deposit = deposits[nodes[j]];
-                totalMultiplier += deposit.rewardMultiplier;
+                Staker storage staker = stakers[nodes[j]];
+                totalMultiplier += staker.rewardMultiplier;
             }
         }
 
@@ -154,10 +154,10 @@ contract NFTVault is ReentrancyGuard, Ownable {
             address stakerAddress = stakerAddresses[i];
             bytes32[] storage nodes = addressToNodes[stakerAddress];
             for (uint256 j = 0; j < nodes.length; j++) {
-                Deposit storage deposit = deposits[nodes[j]];
-                uint256 reward = (rewardPool * deposit.rewardMultiplier) / totalMultiplier;
+                Staker storage staker = stakers[nodes[j]];
+                uint256 reward = (rewardPool * staker.rewardMultiplier) / totalMultiplier;
                 payable(stakerAddress).transfer(reward);
-                deposit.rewardMultiplier = 0;
+                staker.rewardMultiplier = 0;
             }
         }
 
@@ -165,16 +165,20 @@ contract NFTVault is ReentrancyGuard, Ownable {
     }
 
     function claimReward(bytes32 node) public nonReentrant {
-        Deposit storage deposit = deposits[node];
-        require(deposit.owner == msg.sender, "Only the owner can claim rewards");
+        Staker storage staker = stakers[node];
+        require(staker.owner == msg.sender, "Only the owner can claim rewards");
 
         uint256 reward = calculateReward(node);
         require(reward > 0, "No rewards available");
 
-        deposit.lastClaimed = block.timestamp;
+        staker.lastClaimed = block.timestamp;
         rewardPool -= reward;
         totalRewards[msg.sender] += reward;
 
         emit RewardClaimed(msg.sender, reward);
+    }
+
+    function addToRewardPool(uint256 amount) external onlyOwner {
+        rewardPool += amount;
     }
 }

@@ -8,6 +8,7 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./TimeUtils.sol";
+import "./NFTVault.sol";
 
 contract Lottery is
     Ownable,
@@ -18,6 +19,7 @@ contract Lottery is
     using TimeUtils for uint256;
 
     IERC20 public lottoToken;
+    NFTVault public nftVault;
     mapping(uint256 => mapping(string => uint256)) public ticketCount;
     mapping(uint256 => mapping(string => address)) public ticketOwners;
     uint256 public ticketPrice = 0.001 ether; // Precio inicial de 0.001 ETH
@@ -25,6 +27,7 @@ contract Lottery is
     uint256 public prizePool;
     uint256 public organizerFeeRate;
     uint256 public lastDrawTime;
+    uint256 public nftRewardRate = 1000; // 10% para los stakers
     bool public paused = true; // Inicialmente pausado
     bool public prizeLevelsSet = false; // Controla si los niveles de premios están configurados
 
@@ -63,7 +66,8 @@ contract Lottery is
         uint256 _organizerFeeRate,
         address vrfCoordinator,
         bytes32 _keyHash,
-        uint64 subscriptionId
+        uint64 subscriptionId,
+        address _nftVault
     ) Ownable(msg.sender) VRFConsumerBaseV2(vrfCoordinator) {
         lottoToken = IERC20(_lottoToken);
         organizerFeeRate = _organizerFeeRate;
@@ -71,6 +75,7 @@ contract Lottery is
         COORDINATOR = VRFCoordinatorV2Interface(vrfCoordinator);
         keyHash = _keyHash;
         s_subscriptionId = subscriptionId;
+        nftVault = NFTVault(_nftVault);
     }
 
     function setPrizeLevels() external onlyOwner {
@@ -115,33 +120,39 @@ contract Lottery is
         emit PrizeLevelsSet();
     }
 
-    function buyTickets(
-        uint256 series,
-        string memory number,
-        uint256 fraction
-    ) external nonReentrant {
+    function buyTickets(string memory number) external nonReentrant {
         require(!paused, "Sorteo esta pausado");
-        require(series < seriesCount, "Numero de series excedido");
         require(bytes(number).length == 5, "Numero no valido");
-        require(fraction <= fractionCount, "Fraccion no valida");
 
-        uint256 cost = ticketPrice * fraction;
+        (uint256 series, uint256 fraction) = getNextAvailableTicket(number);
+        require(series < seriesCount, "Todas las series y fracciones vendidas para este numero");
+
+        uint256 cost = ticketPrice;
         require(
             lottoToken.transferFrom(msg.sender, address(this), cost),
             "Pago fallido"
         );
 
         // Actualizar el contador de boletos
-        ticketCount[series][number] += fraction;
+        ticketCount[series][number] += 1;
 
         // Registrar el propietario del boleto
         ticketOwners[series][number] = msg.sender;
 
         // Actualizar totalTickets y prizePool
-        totalTickets += fraction;
+        totalTickets += 1;
         prizePool += cost;
 
         emit TicketPurchased(msg.sender, series, number, fraction);
+    }
+
+    function getNextAvailableTicket(string memory number) public view returns (uint256, uint256) {
+        for (uint256 series = 0; series < seriesCount; series++) {
+            if (ticketCount[series][number] < fractionCount) {
+                return (series, ticketCount[series][number]);
+            }
+        }
+        revert("Todas las series y fracciones vendidas para este numero");
     }
 
     function checkUpkeep(
@@ -189,7 +200,8 @@ contract Lottery is
         require(totalTickets > 0, "No tickets sold");
 
         uint256 organizerFee = (prizePool * organizerFeeRate) / 10000;
-        uint256 totalPrize = prizePool - organizerFee;
+        uint256 nftReward = (prizePool * nftRewardRate) / 10000;
+        uint256 totalPrize = prizePool - organizerFee - nftReward;
 
         uint256[] memory prizes = new uint256[](prizeLevels.length);
 
@@ -231,6 +243,13 @@ contract Lottery is
                 );
             }
         }
+
+        // Transfer the NFT reward to the NFTVault contract
+        require(
+            lottoToken.transfer(address(nftVault), nftReward),
+            "NFT reward transfer failed"
+        );
+        nftVault.addToRewardPool(nftReward);
 
         require(
             lottoToken.transfer(owner(), organizerFee),
